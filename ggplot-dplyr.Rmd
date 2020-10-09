@@ -1,0 +1,142 @@
+---
+title: "Dealing with data: ggplot2 and dplyr"
+author: "Carlos Fernandez-Lozano, PhD"
+date: '`r format(Sys.Date(),"Last modified: %e %b %Y")`'
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_float: yes
+  pdf_document:
+    toc: yes
+---
+
+## R's packages
+
+In order to follow the course, please check that you have installed the following R's packages: `ggplot2`, `dplyr`, `TCGAbiolinks` and `SummarizeExperiment`
+
+```{r}
+ # load required packages
+if(!require(ggplot2)) install.packages("ggplot2", repos = "http://cran.us.r-project.org")
+if(!require(dplyr)) install.packages("dplyr", repos = "http://cran.us.r-project.org")
+```
+
+[Bioconductor](https://www.bioconductor.org/) provides tools for the analysis and comprehension of high-throughput genomic data. Bioconductor uses the R statistical programming language, and is open source and open development.
+
+The current release of Bioconductor is version 3.11; it works with R version 4.0.0. Install the latest release of R (please check the [README](https://github.com/cafernandezlo/es_fic_mubics_ggplot_dplyr) file on GitHub), then get the latest version of Bioconductor by starting R and entering the commands:
+
+```{r eval=FALSE}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install(version = "3.11")
+```
+
+And now, please install the remaining packages:
+
+```{r eval=FALSE}
+BiocManager::install(c("TCGAbiolinks", "SummarizeExperiment"))
+```
+
+and attach both packages:
+
+```{r echo=FALSE}
+library(TCGAbiolinks)
+library(SummarizedExperiment)
+```
+
+
+# Session info
+
+`sessionInfo()` display which version of R you are running in which platform and operative system, the locale you are using and the attached packages.
+
+```{r echo=FALSE}
+setwd(dir = '/home/cfernandez/git/es_fic_mubics_ggplot_dplyr/')
+```
+
+
+```{r}
+sessionInfo()
+```
+
+
+# Outline
+
+In this course, we review some of the fundamentals of the ggplot2 and dplyr's grammars. 
+
+# Visualizing data with ggplot2
+
+In this session we will focus our attention on the popular **ggplot2** package
+for visualizing tabular data and will be learning how to create various
+different kinds of plot.
+
+## TCGA Breast Cancer data set
+
+We'll be using the TCGA-breast cancer (BRCA) data set for graphical purposes.
+
+### Download de dataset
+
+[TCGAbiolinks](https://www.bioconductor.org/packages/release/bioc/vignettes/TCGAbiolinks/inst/doc/index.html) is able to access The National Cancer Institute (NCI) Genomic Data Commons (GDC) thorough its
+GDC Application Programming Interface (API) to search, download and prepare relevant data for analysis in R.
+
+The `GDCquery` function uses GDC API to search data from open-access and controlled data. Among others projects, it allows us to download data from the TCGA project. To see the list of valid projects:
+
+```{r}
+getGDCprojects()$project_id
+```
+In this course, we will download the TCGA-BRCA cohort. To see the project summary:
+
+```{r}
+TCGAbiolinks:::getProjectSummary('TCGA-BRCA')
+```
+
+For the complete list please check the packages' vignette. Our interest now is with the expression data so we would like to download `Transcriptome Profiling` of `Gene Expression Quantification` where the experimental strategy is (RNA-seq) and the workflow type is `HTSeq - FPKM-UQ`.
+
+```{r}
+query = GDCquery(project = 'TCGA-BRCA', 
+         data.category = 'Transcriptome Profiling',
+         data.type = 'Gene Expression Quantification',
+         experimental.strategy = 'RNA-Seq',
+         workflow.type = 'HTSeq - FPKM-UQ')
+
+GDCdownload(query)
+```
+
+GDCdownload will download 1222 files, a total of 638.276423 MB of TCGA-BRCA data, it will take a while! ;) The name of the file will build with the day, month, hour and year of the download. Remember, __Reproducible Research__ Example, downloading file as: Fri_Oct__9_10_27_47_2020.tar.gz
+
+Now, we must read the data downloaded and prepare it into an R object:
+
+```{r}
+brca.expDat = GDCprepare(query = query,
+                    save = T,
+                    save.filename = "TCGA-BRCA-RNASeq",
+                    remove.files.prepared =  TRUE)
+```
+
+http://barrabinbarrabash.com/como-solucionar-el-error-curl-60-ssl-certificate-problem-unable-to-get-local-issuer-certificate/
+
+Clinical data is also available for download:
+
+```{r}
+# Download clinical data from XML
+query <- GDCquery(project = "TCGA-BRCA", data.category = "Clinical")
+GDCdownload(query, files.per.chunk = 200)
+```
+
+
+
+# Citation
+
+If you use TCGAbiolinks, please cite:
+
+* Colaprico, Antonio, et al. “TCGAbiolinks: an R/Bioconductor package for integrative analysis of TCGA data.” Nucleic acids research 44.8 (2015): e71-e71.
+
+* Silva, Tiago C., et al. “TCGA Workflow: Analyze cancer genomics and epigenomics data using Bioconductor packages.” F1000Research 5 (2016). (https://f1000research.com/articles/5-1542/v2)
+
+* Mounir, Mohamed, et al. “New functionalities in the TCGAbiolinks package for the study and integration of cancer data from GDC and GTEx.” PLoS computational biology 15.3 (2019): e1006701. (https://doi.org/10.1371/journal.pcbi.1006701)
+
+
+# Summary
+
+In this course we have covered the following concepts:
+
+* The ...
