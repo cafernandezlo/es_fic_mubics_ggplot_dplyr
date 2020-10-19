@@ -1,4 +1,12 @@
+[![GitHub tag](https://img.shields.io/github/tag/cafernandezlo/es_fic_mubics_ggplot_dpyr.svg)](https://GitHub.com/cafernandezlo/es_fic_mubics_ggplot_dplyr/tags/)
+[![GitHub license](https://img.shields.io/github/license/cafernandezlo/es_fic_mubics_ggplot_dplyr.svg)](https://github.com/cafernandezlo/es_fic_mubics_ggplot_dplyr/blob/master/LICENSE)
+[![Maintenance](https://img.shields.io/badge/Maintained%3F-yes-green.svg)](https://GitHub.com/cafernandezlo/es_fic_mubics_ggplot_dplyr/graphs/commit-activity)
+
 # Fundamentals of Bioinformatics
+
+Master's course at the University of A Coruña [(UDC)](https://www.udc.gal). Master in Bioinformatics for Health Sciences [(MUBICS)](https://www.master.bioinformatica.fic.udc.es/), first year from september to february (1st quarter), compulsory, 6 ECTS.
+
+## Dealing with data: ggplot2 and dplyr
 
 This is intended to be an introduction to ggplot2 and dplyr to those in the Fundamentals of Bioinformatics course at the University of A Coruña without previous knowledge.
 
