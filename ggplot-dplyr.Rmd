@@ -116,7 +116,7 @@ brca.expDat = GDCprepare(query = query,
                     save.filename = "TCGA-BRCA-RNASeq",
                     remove.files.prepared =  TRUE)
 ```
-BRCA subtype information from the paper "A comprehensive pan-cancer molecular study of bynecologic and breast cancer", _Cancer Cell_ volume 33, issue 4, pp: 690-705. E9. [link](https://www.cell.com/cancer-cell/fulltext/S1535-6108(18)30119-3).
+BRCA subtype information from the paper "A comprehensive pan-cancer molecular study of gynecologic and breast cancer", _Cancer Cell_ volume 33, issue 4, pp: 690-705. E9. [link](https://www.cell.com/cancer-cell/fulltext/S1535-6108(18)30119-3).
 
 
 Clinical data is also available for download alone:
