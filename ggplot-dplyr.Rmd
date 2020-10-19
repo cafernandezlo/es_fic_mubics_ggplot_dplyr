@@ -37,11 +37,16 @@ And now, please install the remaining packages:
 BiocManager::install(c("TCGAbiolinks", "SummarizeExperiment"))
 ```
 
-and attach both packages:
+and attach both packages and some others:
 
-```{r echo=FALSE}
+```{r echo=TRUE,results='hide',message = FALSE}
 library(TCGAbiolinks)
 library(SummarizedExperiment)
+library(biomaRt)
+library(GEOquery)
+library(ggplot2)
+library(stringr)
+library(tidyverse)
 ```
 
 
@@ -91,7 +96,7 @@ TCGAbiolinks:::getProjectSummary('TCGA-BRCA')
 
 For the complete list please check the packages' vignette. Our interest now is with the expression data so we would like to download `Transcriptome Profiling` of `Gene Expression Quantification` where the experimental strategy is (RNA-seq) and the workflow type is `HTSeq - FPKM-UQ`.
 
-```{r}
+```{r echo=TRUE,results='hide',message = FALSE}
 query = GDCquery(project = 'TCGA-BRCA', 
          data.category = 'Transcriptome Profiling',
          data.type = 'Gene Expression Quantification',
@@ -111,17 +116,1150 @@ brca.expDat = GDCprepare(query = query,
                     save.filename = "TCGA-BRCA-RNASeq",
                     remove.files.prepared =  TRUE)
 ```
+BRCA subtype information from the paper "A comprehensive pan-cancer molecular study of bynecologic and breast cancer", _Cancer Cell_ volume 33, issue 4, pp: 690-705. E9. [link](https://www.cell.com/cancer-cell/fulltext/S1535-6108(18)30119-3).
 
-http://barrabinbarrabash.com/como-solucionar-el-error-curl-60-ssl-certificate-problem-unable-to-get-local-issuer-certificate/
 
-Clinical data is also available for download:
+Clinical data is also available for download alone:
 
-```{r}
+```{r eval=FALSE}
 # Download clinical data from XML
 query <- GDCquery(project = "TCGA-BRCA", data.category = "Clinical")
 GDCdownload(query, files.per.chunk = 200)
 ```
 
+Let's process the dataset a little bit.
+
+```{r}
+brca.omics = assay(brca.expDat)
+brca.omics = as.data.frame(t(brca.omics))
+```
+
+Let's have a look at our data. We have patients in rows and genes in columns:
+
+```{r}
+brca.omics[1:5,1:5]
+```
+
+We would like to keep patients with `Primary solid Tumor`
+
+```{r}
+samples = colData(brca.expDat)
+rownames(samples) = 1:nrow(samples)
+ptSamples = samples[which(samples$definition == 'Primary solid Tumor'), ]
+```
+
+We have the following clinical data:
+
+```{r}
+colnames(ptSamples)
+```
+
+We decide to keep the following clinical information:
+
+```{r}
+ptSamples = ptSamples[, c('barcode', 'patient', 'vital_status', 'days_to_last_follow_up', 'days_to_death', 'gender', 'age_at_diagnosis')]
+dim(ptSamples)
+```
+
+We will filter omic data keeping the protein coding information and finally we'll extract the Affymetrix profile of GPL96
+
+```{r}
+mart <- useDataset("hsapiens_gene_ensembl", useMart("ensembl"))
+convert <- getBM(filters= c('ensembl_gene_id'), 
+                 attributes= c('ensembl_gene_id', 'gene_biotype'),
+                 values=names(brca.omics),
+                 mart= mart)
+protCod = convert[which(convert$gene_biotype == 'protein_coding'), ]
+protCodIDs = protCod$ensembl_gene_id
+brca.omics = brca.omics[, match(protCodIDs, names(brca.omics))]
+
+platID96 = 'GPL96'
+
+gpl96 = getGEO(platID96)
+gpl96 = gpl96@dataTable@table
+annot96 = gpl96[, c('ID', 'Gene Symbol', 'Gene Title', 'ENTREZ_GENE_ID')]
+
+dict96 = getBM(filters= c('affy_hg_u133a'), 
+               attributes= c('ensembl_gene_id', 'affy_hg_u133a','hgnc_symbol'),
+               values= annot96$ID,
+               mart= mart)
+
+genes96 = unique(dict96$ensembl_gene_id)
+brca.omics.96 = brca.omics[, intersect(names(brca.omics), genes96)]
+```
+
+Let's change the colnames from ENSEMBL gene id to HGNC symbol:
+
+```{r}
+colnames(brca.omics.96)<- dict96$hgnc_symbol[match(colnames(brca.omics.96),dict96$ensembl_gene_id)]
+
+brca.omics.96 <- brca.omics.96[,c('GATA3','ESR1')]
+```
+
+Summarizing we downloaded TCGA-BRCA data, and retain primary solid tumor information, clinical data, Affymetrix profile of GPL96, protein coding and we changed the colnames from ENSEMBL gene id to HGNC symbol. We will consider only two genes in order to reduce the data.frame.
+
+```{r}
+brca.omics.96[1:5,1:2]
+```
+
+
+## The first ggplot
+
+First we'll create a simple scatter plot much like the ones we've created in
+previous sessions using R's `plot()` function. We'll plot the expression of
+estrogen receptor alpha (ESR1) against that of the transcription factor, GATA3.
+
+```{r scatter_plot_1_}
+ggplot(data = brca.omics.96) +
+  geom_point(mapping = aes(x = GATA3, y = ESR1))
+```
+
+We specified 3 things to create this plot:
+
+1. The **data** -- needs to be a data frame
+2. The type of plot -- this is called a **geom** in ggplot2 terminology
+3. The mapping of variables in the data to visual properties of objects in the plot - these are called **aesthetics** in ggplot2
+
+In this case, the type of plot is a **`geom_point`**, ggplot2's function for a
+scatter plot, and the expression of the genes GATA3 and ESR1 (estrogen receptor
+alpha) are mapped to the **`x`** and **`y`** coordinates, i.e. the positions of
+points on the scatter plot.
+
+Other aesthetics include the size, shape and colour of the points. It might seem
+a little surprising that the x and y coordinates are treated in the same way as
+we wouldn't normally think about these as having aesthetic qualities but this is
+indeed the case with ggplot2.
+
+### Aesthetic mappings
+
+ Aesthetic mappings
+
+Look up the `geom_point` help page to see the list of aesthetics that are
+available for this geom.
+
+```{r eval = FALSE}
+?geom_point
+```
+
+If you scroll down to the aesthetics section in the help page for `geom_point`,
+you'll see that the **`x`** and **`y`** aesthetics are in bold face which tells
+us that these are required, i.e. you have to supply them, otherwise you'll get
+an error message from ggplot.
+
+Other aesthetics such as size, shape, colour and transparency (`alpha`) are
+optional.
+
+So what about those other aesthetics? Colours are usually fun -- let's try to
+use the `colour` aesthetic.
+
+We need to map a variable to a colour just like we did for x and y. We'll use
+the `gender` as an example.
+
+```{r scatter_plot_2_}
+brca.omics.96$gender = ptSamples[match(row.names(brca.omics.96), ptSamples$barcode),"gender"]
+ggplot(data = brca.omics.96) +
+  geom_point(mapping = aes(x = GATA3, y = ESR1, colour = gender))
+```
+We have three different levels for the gender: female, male and `NA`.
+
+What about colouring points based on a continuous variable?
+
+```{r scatter_plot_3}
+brca.omics.96$age_at_diagnosis = ptSamples[match(row.names(brca.omics.96), ptSamples$barcode),"age_at_diagnosis"]
+ggplot(data = brca.omics.96) +
+  geom_point(mapping = aes(x = GATA3, y = ESR1, colour = age_at_diagnosis))
+```
+
+__TIP:__ age at diagnosis in TCGA is not in years ;)
+
+ggplot2 uses a color scale for a continuous variable but discrete colors for
+discrete or categorical values.
+
+Size is not usually a good aesthetic to map to a variable. This is particularly
+the case where we have such a large number of observations.
+
+```{r scatter_plot_3_, eval=FALSE}
+ggplot(data = brca.omics.96) +
+  geom_point(mapping = aes(x = GATA3, y = ESR1, size = gender))
+```
+
+It would however be useful to be able to decrease the size of the points given
+that there are around 2000 in this data set. We can do so by setting the size
+to a single value rather than mapping it to one of the variables in the data
+set - this has to be done outside the aesthetic mappings, i.e. outside the
+`aes()` bit.
+
+```{r scatter_plot_4}
+ggplot(data = brca.omics.96) +
+  geom_point(mapping = aes(x = GATA3, y = ESR1, colour = age_at_diagnosis),size=0.5)
+```
+
+Some aesthetics can only be used with categorical variables, e.g. shape.
+
+```{r scatter_plot_5}
+ggplot(data = brca.omics.96) +
+  geom_point(mapping = aes(x = GATA3, y = ESR1, shape = gender))
+```
+
+Note that some of the patient samples have not been classified and ggplot has
+removed those points with missing values.
+
+It is usually preferable to use colours to distinguish between different
+categories but sometimes colour and shape are used together where we want to
+show which group a data point belongs to in two different categorical variables.
+
+```{r scatter_plot_6}
+ggplot(data = brca.omics.96) +
+  geom_point(mapping = aes(x = GATA3, y = ESR1, shape = gender, colour = age_at_diagnosis),size=2)
+```
+Transparency can be useful when we have a large number of points as we can more
+easily tell when points are overlaid, but like size, it is not usually mapped to
+a variable and sits outside the `aes()`.
+
+```{r scatter_plot_7}
+ggplot(data = brca.omics.96) +
+  geom_point(mapping = aes(x = GATA3, y = ESR1, colour = age_at_diagnosis),size=0.75, alpha= 0.5)
+```
+
+Colours are more commonly used than shapes, sizes or transparency.
+
+Virtually every aspect of the plots we've created can be customized. We will
+learn how to change the colours used as well as other display parameters later
+in the course.
+
+### ggplot2 grammar
+
+The "gg" in ggplot2 stands for "grammar of graphics". This grammar is a coherent
+system for describing and building graphs.
+
+The basic template is given in the summary box below. This template can be used
+to create any of a wide range of graph types with ggplot2.
+
+```{block type = "rmdblock"}
+**ggplot2 grammar of graphics**
+**`ggplot(data = <DATA>) + <GEOM_FUNCTION>(mapping = aes(<MAPPINGS>))`**
+`ggplot()` creates the plot object.
+Layers can be added by adding geoms such as `geom_point()` using the `+`
+operator that ggplot2 has overridden for this purpose.
+```
+
+## Another plot type - bar chart
+
+The range of geoms available in ggplot2 can be obtained by navigating to the
+ggplot2 package in the Packages tab pane in RStudio (bottom right-hand corner)
+and scrolling down the list of functions sorted alphabetically to the `geom_...`
+functions.
+
+geom_bar` is the geom we need and it requires a single aesthetic mapping of the
+categorical variable of interest to `x`.
+
+```{r bar_plot_1}
+ggplot(data = brca.omics.96) +
+  geom_bar(mapping = aes(x = gender))
+```
+
+The dark grey bars are a big ugly - what if we want each bar to be a different
+colour?
+
+```{r bar_plot_2}
+ggplot(data = brca.omics.96) +
+  geom_bar(mapping = aes(x = gender, colour = gender))
+```
+
+Colouring the edges wasn't quite what we had in mind. Look at the help for
+`geom_bar` to see what other aesthetic we should have used.
+
+```{r bar_plot_3}
+ggplot(data = brca.omics.96) +
+  geom_bar(mapping = aes(x = gender, fill = gender))
+```
+
+What happens if we colour (fill) with something other than the integrative
+cluster?
+
+```{r bar_plot_4}
+brca.omics.96$vital_status = ptSamples[match(row.names(brca.omics.96), ptSamples$barcode),"vital_status"]
+
+ggplot(data = brca.omics.96) +
+  geom_bar(mapping = aes(x = gender, fill = vital_status))
+```
+
+We get a stacked bar plot.
+
+Note the similarity in what we did here to what we did with the scatter plot
+- there is a common grammar.
+
+What if want all the bars to be the same colour but not dark grey, e.g. blue?
+
+```{r bar_plot_5}
+ggplot(data = brca.omics.96) +
+  geom_bar(mapping = aes(x = gender, fill = 'blue'))
+```
+
+hat doesn't look right - why not?
+
+You can set the aesthetics to a fixed value but this needs to be outside the
+mapping, just like we did before for size and transparency in the scatter plots.
+
+```{r bar_plot_6}
+ggplot(data = brca.omics.96) +
+  geom_bar(mapping = aes(x = gender),  fill = 'blue')
+```
+
+Setting this inside the `aes()` mapping told ggplot2 to map the colour aesthetic
+to some variable in the data frame, one that doesn't really exist but which is
+created on-the-fly with a value of "blue" for every observation.
+
+## Statistical transformations (ADVANCED)
+
+You may have noticed that ggplot2 didn't just plot values from our data set but
+had to do some calculation first for the bar chart, i.e. it had to sum the
+number of observations in each category.
+
+Each geom has a **statistical transformation**. In the case of the scatter plot,
+`geom_point` uses the "identity" transformation which means just use the values
+as they are, i.e. not really a transformation at all. The statistical
+transformation for `geom_bar` is "count", which means it will count the number
+of observations for each category in the variable mapped to the x aesthetic.
+
+You can see which statistical transformation is being used by a geom by looking
+at the `stat` argument in the help page for that geom.
+
+## Multiple layers
+
+Consider again the ggplot2 grammar:
+
+```
+ggplot(data = <DATA>) +
+  <GEOM_FUNCTION>(mapping = aes(<MAPPINGS>))
+```
+
+Why do we have the ggplot part and geom part joined by a "+" symbol?
+
+The **'+'** operator has been overridden by ggplot2 to add layers (geoms) and
+other components (scales, themes, etc.) to the plot.
+
+We can have multiple geoms in the same plot. Each is a different layer.
+
+Let's create a plot with two geoms.
+
+```{r scatter_line_plot_1}
+ggplot(data = brca.omics.96) +
+  geom_point(mapping = aes(x = GATA3, y = ESR1)) +
+  geom_smooth(mapping = aes(x = GATA3, y = ESR1))
+```
+
+What is **`geom_smooth()`** doing? Look up the help page.
+
+Note that the shaded area surrounding blue line represents the standard error
+bounds on the fitted model.
+
+It is important when breaking these ggplot statements across multiple lines to
+ensure that the `+` is at the end of the line so that R knows you haven't
+finished constructing your plot.
+
+There is some annoying duplication of code used to create this plot. We've
+repeated the exact same aesthetic mapping for both geoms. We can avoid this by
+putting the mappings in the `ggplot()` function instead.
+
+```{r scatter_line_plot_2}
+ggplot(data = brca.omics.96, mapping = aes(x = GATA3, y = ESR1)) +
+  geom_point() +
+  geom_smooth()
+```
+
+Let's make the plot look a bit prettier by reducing the size of the points and
+making them transparent. We're not mapping `size` or `alpha` to any variables,
+just setting them to constant values, and we only want these settings to apply
+to the points, so we set them inside `geom_point()`.
+
+```{r scatter_line_plot_3}
+ggplot(data = brca.omics.96, mapping = aes(x = GATA3, y = ESR1)) +
+  geom_point(size = 0.5, alpha = 0.5) +
+  geom_smooth()
+```
+
+Aesthetics set in the `ggplot` function are treated as global mappings for the
+plot and are inherited by all geoms added to the plot.
+
+Let's say we still want to colour the points by gender.
+
+```{r scatter_line_plot_4}
+ggplot(data = brca.omics.96, mapping = aes(x = GATA3, y = ESR1, colour = gender)) +
+  geom_point(size = 0.5, alpha = 0.5) +
+  geom_smooth()
+```
+
+Well, that wasn't expected, although it's pretty neat. We only wanted to apply
+the colour aesthetic to the points.
+
+We can add the colour aesthetic to the `geom_point()` function instead of as a
+global mapping in the `ggplot()` function.
+
+```{r scatter_line_plot_5}
+ggplot(data = brca.omics.96, mapping = aes(x = GATA3, y = ESR1)) +
+  geom_point(mapping = aes(colour = gender), size = 0.5, alpha = 0.5) +
+  geom_smooth()
+```
+
+Or suppose you've spent a bit of time getting your scatter plot just right and
+decide to add another layer but you're a bit worried about interfering with the
+the code you so lovingly crafted, you can set the `inherit.aes` option to
+`FALSE` and set the aesthetic mappings explicitly for your new layer.
+
+```{r scatter_line_plot_6}
+ggplot(data = brca.omics.96, mapping = aes(x = GATA3, y = ESR1, colour = gender)) +
+  geom_point(size = 0.5, alpha = 0.5) +
+  geom_smooth(mapping = aes(x = GATA3, y = ESR1), inherit.aes = FALSE)
+```
+
+## Box plots
+
+Let's plot our first boxplot.
+
+```{r box_plot_1}
+ggplot(data = brca.omics.96, mapping = aes(x = gender, y = GATA3)) +
+  geom_boxplot()
+```
+
+See `geom_boxplot` help to explain how the box and whiskers are constructed and
+how it decides which points are outliers and should be displayed as points.
+
+How about adding another layer to display all the points?
+
+```{r box_plot_2}
+ggplot(data = brca.omics.96, mapping = aes(x = gender, y = GATA3)) +
+  geom_boxplot()+
+  geom_point()
+```
+
+Ideally, we'd like these points to be spread out a bit. The `geom_point` help
+points to `geom_jitter` as more suitable when one of the variables is
+categorical.
+
+```{r box_plot_3}
+ggplot(data = brca.omics.96, mapping = aes(x = gender, y = GATA3)) +
+  geom_boxplot()+
+  geom_jitter()
+```
+
+Well, that's a bit of a mess. We need to reduce the spread or jitter and make
+the points smaller and transparent.
+
+```{r box_plot_4}
+ggplot(data = brca.omics.96, mapping = aes(x = gender, y = GATA3)) +
+  geom_boxplot()+
+  geom_jitter(width = 0.3, size = 0.5, alpha = 0.25)
+```
+
+Displaying points in this way makes much more sense when we only have a few
+observations and where the box plot masks the fact, perhaps giving the false
+impression that the sample size is larger than it actually is. Here it makes
+less sense as we have very many observations.
+
+```{r box_plot_5}
+ggplot(data = brca.omics.96, mapping = aes(x = gender, y = GATA3, colour = vital_status)) +
+  geom_boxplot()
+```
+
+## Histograms
+
+The geom for creating histograms is, rather unsurprisingly, `geom_histogram()`.
+
+```{r histogram_plot_1}
+ggplot(data = brca.omics.96) +
+  geom_histogram(mapping = aes(x = age_at_diagnosis))
+```
+
+The warning message hints at picking a more optimal number of bins by specifying
+the `binwidth` argument.
+
+```{r histogram_plot_2}
+ggplot(data = brca.omics.96) +
+  geom_histogram(mapping = aes(x = age_at_diagnosis), binwidth = 5)
+```
+
+Or we can set the number of bins.
+
+```{r histogram_plot_3}
+ggplot(data = brca.omics.96) +
+  geom_histogram(mapping = aes(x = age_at_diagnosis), bins = 20)
+```
+
+These histograms are not very pleasing, aesthetically speaking - how about some
+better aesthetics?
+
+```{r histogram_plot_4}
+ggplot(data = brca.omics.96) +
+  geom_histogram(mapping = aes(x = age_at_diagnosis), bins = 20, colour = "darkblue", fill = "grey")
+```
+
+
+# Faceting with ggplot2
+
+Finally, let's change tack completely and take a look at a very useful feature
+of ggplot2 -- **faceting**.
+
+Faceting allows you to split your plot into subplots, or facets, based on one
+or more categorical variables. Each of the subplots displays a subset of the
+data.
+
+There are two faceting functions, **`facet_wrap()`** and **`facet_grid()`**.
+
+Let's create a scatter plot of GATA3 and ESR1 expression values where we're
+displaying the gender using different colours.
+This is a very similar to a plot we created last week.
+
+```{r scatter_plot_facetting}
+ggplot(data = brca.omics.96, mapping = aes(x = GATA3, y = ESR1, colour = gender)) +
+  geom_point(size = 0.5, alpha = 0.5)
+```
+
+An alternative is to use faceting with **`facet_wrap()`**.
+
+```{r scatter_plot_facetting_1}
+ggplot(data = brca.omics.96, mapping = aes(x = GATA3, y = ESR1)) +
+  geom_point(size = 0.5, alpha = 0.5) +
+  facet_wrap(vars(gender))
+```
+
+This produces three plots, side-by-side, one for each of the categories in the
+`gender` variable, with a banner across the top of each for the category.
+
+The variable(s) used for faceting are specified using `vars()`. We can still use separate colours if we prefer things to be, well, colourful.
+
+```{r scatter_plot_facetting_2}
+ggplot(data = brca.omics.96, mapping = aes(x = GATA3, y = ESR1, colour = gender)) +
+  geom_point(size = 0.5, alpha = 0.5) +
+  facet_wrap(vars(gender))
+```
+
+Faceting is usually better than displaying groups using different colours when
+there are more than two or three groups when it can be difficult to really tell
+which points belong to each group.
+
+# Customizing plots with ggplot2
+
+Finally, we'll turn our attention back to visualization using ggplot2 and how
+we can customize our plots by adding or changing titles and labels, changing the
+scales used on the x and y axes, and choosing colours.
+
+## Titles and labels
+
+Adding titles and subtitles to a plot and changing the x- and y-axis labels is
+very straightforward using the `labs()` function.
+
+```{r scatter_plot_customizing_1}
+plot <- ggplot(data = brca.omics.96, mapping = aes(x = GATA3, y = ESR1, colour = gender)) +
+  geom_point(size = 0.5, alpha = 0.5) +
+  geom_smooth(method = "lm") +
+  labs(
+    title = "RNA-seq data in the TCGA-BRCA",
+    subtitle = "GATA3 and ESR1. Affymetrix profile of GPL96",
+    x = "GATA3 expression",
+    y = "ESR1 expression",
+    colour = "Gender"
+  )
+plot
+```
+
+The labels are another component of the plot object that we've constructed,
+along with aesthetic mappings and layers (geoms). The plot object is a list and
+contains various elements including those mappings and layers and one element
+named `labels`.
+
+`labs()` is a simple function for creating a list of labels you want to specify
+as name-value pairs as in the above example. You can name any aesthetic (in this
+case x and y) to override the default values (the column names) and you can add a
+title, subtitle and caption if you wish. In addition to changing the x- and
+y-axis labels, we also removed the underscore from the legend title by setting
+the label for the colour aesthetic.
+
+## Scales
+
+Take a look at the x and y scales in the above plot. ggplot2 has chosen the x
+and y scales and where to put breaks and ticks.
+
+Let's have a look at the elements of the list object we created that specifies
+how the plot should be displayed.
+
+```{r}
+names(plot)
+```
+
+One of the components of the plot is called `scales`. ggplot2 automatically
+adds default scales behind the scenes equivalent to the following:
+
+```{r eval = FALSE}
+plot <- ggplot(data = brca.omics.96, mapping = aes(x = GATA3, y = ESR1, colour = gender)) +
+  geom_point(size = 0.6, alpha = 0.5) +
+  geom_smooth(method = "lm") +
+  scale_x_continuous() +
+  scale_y_continuous() +
+  scale_colour_discrete()
+plot
+```
+
+```{r}
+plot$mapping
+```
+
+The x and y variables (`GATA3` and `ESR1`) are continuous so ggplot2 adds a
+continuous scale for each. `ER_status` is a discrete variable in this case so
+ggplot2 adds a discrete scale for colour.
+
+Generalizing, the scales that are required follow the naming scheme:
+
+```
+scale_<NAME_OF_AESTHETIC>_<NAME_OF_SCALE>
+```
+
+Look at the help page for `scale_y_continuous` to see what we can change about
+the y-axis scale.
+
+First we'll change the breaks, i.e. where ggplot2 puts ticks and numeric
+labels, on the y axis.
+
+Note that we have three aesthetics and ggplot2 adds a scale for each.
+
+```{r scatter_plot_customizing_2}
+ggplot(data = brca.omics.96, mapping = aes(x = GATA3, y = ESR1, colour = gender)) +
+  geom_point(size = 0.6, alpha = 0.5) +
+  geom_smooth(method = "lm") +
+  scale_y_continuous(breaks = seq(0, 6000000, by = 1000000))
+```
+
+`seq()` is a useful function for generating regular sequences of numbers. In
+this case we wanted numbers from 0 to 6000000 going up in steps of 1000000.
+
+```{r}
+seq(0, 6000000, by = 1000000)
+```
+
+We could do the same thing for the x axis using `scale_x_continuous()`.
+
+We can also adjust the extents of the x or y axis.
+
+```{r scatter_plot_customizing_3}
+ggplot(data = brca.omics.96, mapping = aes(x = GATA3, y = ESR1, colour = gender)) +
+  geom_point(size = 0.6, alpha = 0.5) +
+  geom_smooth(method = "lm") +
+  scale_y_continuous(breaks = seq(0, 6000000, by = 1000000), limits = c(1000000, 2000000))
+```
+
+Here, just for demonstration purposes, we set the upper limit to be less than
+the largest values of ESR1 expression and ggplot2 warned us that some rows have
+been removed from the plot. 
+
+A more typical scenario would be to keep the breaks, because we want to display
+the ticks and their lables, but remove the grid lines. Somewhat confusingly the
+position of grid lines are controlled by a scale but preventing these from being
+displayed requires changing the theme. The theme controls the way in which
+non-data components are displayed -- we'll look at how these can be customized
+next week. For now, though, here's an example of turning off the display of all
+grid lines for major and minor breaks for both axes.
+
+```{r scatter_plot_customizing_4}
+ggplot(data = brca.omics.96, mapping = aes(x = GATA3, y = ESR1, colour = gender)) +
+  geom_point(size = 0.6, alpha = 0.5) +
+  geom_smooth(method = "lm") +
+  scale_y_continuous(breaks = seq(1000000, 2000000, by = 100000), limits = c(850000, 2150000)) +
+  theme(panel.grid = element_blank())
+```
+
+By default, the scales are expanded by 5% of the range on either side. We can
+add or reduce the space as follows.
+
+```{r scatter_plot_customizing_5}
+ggplot(data = brca.omics.96, mapping = aes(x = GATA3, y = ESR1, colour = gender)) +
+  geom_point(size = 0.6, alpha = 0.5) +
+  geom_smooth(method = "lm") +
+  scale_x_continuous(expand = expansion(mult = 0.01)) +
+  scale_y_continuous(expand = expansion(mult = 0.25))
+```
+
+Here we only added 1% (0.01) of the range of GATA3 expression values on either
+side along the x axis but we added 25% (0.25) of the range of ESR1 expression on
+either side along the y axis.
+
+## Colours
+
+The colour asthetic is used with a categorical variable, `ER_status`, in the
+scatter plots we've been customizing. The default colour scale used by ggplot2
+for categorical variables is `scale_colour_discrete`. We can manually set the
+colours we wish to use using `scale_colour_manual` instead.
+
+```{r scatter_plot_customizing_6}
+ggplot(data = brca.omics.96, mapping = aes(x = GATA3, y = ESR1, colour = gender)) +
+  geom_point(size = 0.6, alpha = 0.5) +
+  geom_smooth(method = "lm") +
+  scale_colour_manual(values = c("dodgerblue2", "firebrick2"))
+```
+
+Setting colours manually is ok when we only have two or three categories but
+when we have a larger number it would be handy to be able to choose from a
+selection of carefully-constructed colour palettes. Helpfully, ggplot2 provides
+access to the [ColorBrewer](http://colorbrewer2.org) palettes through the
+functions `scale_colour_brewer()` and `scale_fill_brewer()`.
+
+Look at the help page for `scale_colour_brewer` to see what other colour
+palettes are available and visit the [ColorBrewer](http://colorbrewer2.org)
+website to see what these look like.
+
+Interestingly, you can set other attributes other than just the colours at the
+same time.
+
+```{r scatter_plot_customizing_7}
+ggplot(data = brca.omics.96, mapping = aes(x = GATA3, y = ESR1, colour = gender)) +
+  geom_point(size = 0.6, alpha = 0.5) +
+  geom_smooth(method = "lm") +
+  scale_colour_manual(values = c("dodgerblue2", "firebrick2"), labels = c("Mujer", "Hombre", "Dato no presente")) +
+  labs(colour = NULL)  # remove legend title for colour now that the labels are self-explanatory
+```
+
+We have applied our own set of mappings from levels in the data to aesthetic
+values.
+
+# Data manipulation with dplyr
+
+**dplyr** is one of the packages that gets loaded as part of the tidyverse.
+
+```{r}
+library(tidyverse)
+```
+
+dplyr is the Swiss army knife in the tidyverse, providing many useful functions
+for manipulating tabular data in data frames or tibbles. We're going to look at
+the key functions for filtering our data, modifying the contents and computing
+summary statistics.
+
+We'll also introduce the pipe operator, **`%>%`**, for chaining operations
+together into mini workflows in a way that makes for more readable and
+maintainable code.
+
+Finally, we'll return to plotting and look at a powerful feature of ggplot2,
+**faceting**, that allows you to divide your plots into subplots by splitting
+the observations based on one or more categorical variables.
+
+We'll again use the TCGA-BRCA data set to illustrate how these operations work.
+
+## Data semantics
+
+We use the terms 'observation' and 'variable' a lot in this course. As a
+reminder from week 2, when we talk about an observation, we're talking about a
+set of values measured for the same unit or thing, e.g. a person or a date, and
+when we talk about a variable we are really talking about the attribute that we
+are measuring or recording, e.g. height, temperature or expression value.
+
+**Observations are represented as rows** in our data frames or tibbles, while
+the **columns correspond to variables**.
+
+```{block type = "rmdblock"}
+From **"Tidy Data"** by **Hadley Wickham**, [*The Journal of Statistical
+Software*, vol. 59, 2014](https://www.jstatsoft.org/index.php/jss/article/view/v059i10/v59i10.pdf).
+A data set is a collection of **values**, usually either numbers (if
+quantitative) or character strings (if qualitative). Values are organised in
+two ways. Every value belongs to a variable and an observation.
+A **variable** contains all values that measure the same underlying attribute
+(like height, temperature, duration) across units.
+An **observation** contains all values measured on the same unit (like a person
+or a day) across attributes.
+```
+
+---
+
+## dplyr verbs
+
+We will be looking at the 5 key dplyr functions:
+
+* **`filter()`** for filtering rows
+* **`select()`** for selecting columns
+* **`arrange()`** for sorting rows
+* **`mutate()`** for modifying columns or creating new ones
+* **`summarise()`** for computing summary values
+
+In looking at each of these in turn, we'll be applying these to the entire data
+set. It is possible to combine these with the `group_by()` function to instead
+operate on separate groups within our data set.
+
+The dplyr operations are commonly referred to as "verbs" in a data manipulation
+grammar. These verbs have a common syntax and work together in a consistent and
+uniform manner. They all have the following shared behaviours:
+
+* The first argument in each function is a data frame (or tibble)
+
+* Any additional arguments describe what operation to perform on the data frame
+
+* Variable names, i.e. column names, are referred to without using quotes
+
+* The result of an operation is a new data frame
+
+---
+
+## Filtering rows with `filter()`
+
+The **`filter`** verb allows you to choose rows from a data frame that match
+some specified criteria. The criteria are based on values of variables and can
+make use of comparison operators such as `==`, `>`, `<` and `!=`.
+
+For example, to filter the TCGA data set so that it only contains
+observations for those patients who died of breast cancer we can use `filter()`
+as follows.
+
+```{r}
+deceased <- filter(brca.omics.96, vital_status == "Dead")
+deceased
+```
+
+Remember that the **`==`** operator tests for equality, i.e. is the value for
+`vital_status` for each patient (observation) equal to "Dead".
+
+This filtering operation is equivalent to subsetting the rows based on a logical
+vector resulting from our comparison of vital status values with "Dead".
+
+```{r eval = FALSE}
+filter(brca.omics.96, vital_status == "Dead")
+# is equivalent to
+brca.omics.96[brca.omics.96$vital_status %in% "Dead", ]
+```
+
+Both achieve the same result but the dplyr filter method is arguably a little
+easier to read. We haven't had to write `brca.omics.96` twice for one thing; we just
+referred to the variable name as it is, unquoted and without any fuss.
+
+specify which classes we are interested in and
+use the **`%in%`** operator to test which observations (rows) contain those
+values.
+
+```{r}
+vital_status <- filter(brca.omics.96, vital_status %in% c("Dead", "Alive"))
+nrow(vital_status)
+```
+
+__TIP:__ be careful with `vital_status`, as it has `NAs`.
+
+```{r}
+length(which(is.na(brca.omics.96$vital_status)))
+```
+Another of the tidyverse packages, **`stringr`**, contains a set of very useful
+functions for operating on text or character strings. One such function,
+**`str_starts()`** could be used to find all `vital_status` values that start
+with "De".
+
+```{r}
+deceased <- filter(brca.omics.96, str_starts(vital_status, "De"))
+nrow(deceased)
+```
+
+Note that `str_starts()` returns a logical vector - this is important since the
+filtering condition must evaluate to `TRUE` or `FALSE` values for each row.
+
+Unsurprisingly there is an equivalent function, `str_ends()`, for matching the
+end of text (character) values and `str_detect()` is another useful function
+that determines whether values match a regular expression. Regular expressions
+are a language for search patterns used frequently in computer programming and
+really worth getting to grips with but sadly these are beyond the scope of this
+course.
+
+Filtering based on a logical variable is the most simple type of filtering of
+all. We don't have any logical variables in our METABRIC data set so we'll
+create one from the binary `Survival_status` variable to use as an example.
+
+```{r}
+# create a new logical variable called 'Deceased'
+brca.omics.96$Deceased <- brca.omics.96$vital_status == "Dead"
+#
+# filtering based on a logical variable - only selects TRUE values
+deceased <- filter(brca.omics.96, Deceased)
+#
+head(deceased)
+```
+
+We can use the **`!`** operator to filter those patients who are not
+deceased.
+
+```{r eval = FALSE}
+filter(brca.omics.96, !Deceased)
+```
+
+`filter()` only retains rows where the condition if `TRUE`; both `FALSE` and
+`NA` values are filtered out.
+
+We can apply more than one condition in our filtering operation, for example the patients who were still alive at the time of the TCGA study and are males.
+
+```{r}
+filter(brca.omics.96, vital_status == "Alive", gender== 'male')
+```
+
+We can add as many conditions as we like separating each with a comma. Note that
+filtering using R subsetting gets more unreadable, and more cumbersome to code,
+the more conditions you add.
+
+Adding conditions in this way is equivalent to combining the conditions using
+the **`&`** (Boolean AND) operator.
+
+## # Selecting columns with `select()`
+
+Another way of "slicing and dicing"" our tabular data set is to select just the
+variables or columns we're interested in.
+
+Using the `$` operator is quite convenient for selecting a single column and
+extracting the values as a vector. Selecting several columns using the `[]`
+subsetting operator is a bit more cumbersome. 
+
+Notice the similarities with the `filter()` function. The first argument is the
+data frame we are operating on and the arguments that follow on are specific to
+the operation in question, in this case, the variables (columns) to select. Note
+that the variables do not need to be put in quotes, and the returned value is
+another data frame, even if only one column was selected.
+
+We can alter the order of the variables (columns).
+
+```{r}
+dplyr::select(brca.omics.96, GATA3, age_at_diagnosis, gender, ESR1)
+```
+
+The help page for `select` points to some special functions that can be used
+within `select()`. We can find all the columns, for example, that contain the
+term "status" using `contains()`.
+
+```{r}
+dplyr::select(brca.omics.96, contains("status"))
+```
+
+If we only wanted those ending with "status" we could use `ends_with()`
+instead.
+
+```{r}
+dplyr::select(brca.omics.96, ends_with("status"))
+```
+
+We can also select those columns we're not interested in and that shouldn't be
+included by prefixing the columns with **`-`**.
+
+```{r}
+dplyr::select(brca.omics.96, -GATA3)
+```
+
+You can use a combination of explicit naming, ranges, helper functions and
+negation to select the columns of interest.
+
+We can also select a range of columns using **`:`*
+
+You can also use `select()` to completely reorder the columns so they're in the
+order of your choosing. The `everything()` helper function is useful in this
+context, particularly if what you're really interested in is bringing one or
+more columns to the left hand side and then including everything else
+afterwards in whatever order they were already in.
+
+```{r}
+dplyr::select(brca.omics.96, vital_status, everything())
+```
+
+Finally, columns can be renamed as part of the selection process.
+
+```{r}
+dplyr::select(brca.omics.96, GATA3, estado_vital = vital_status)
+```
+
+Note that dplyr provides the `rename()` function for when we only want to rename
+a column and not select a subset of columns.
+
+---
+
+## Chaining operations using `%>%`
+
+here is another way chaining together a series of operations into a
+mini workflow that is elegant, intuitive and makes for very readable R code.
+For that we need to introduce a new operator, the **pipe** operator, **`%>%`**.
+
+```{block type = "rmdblock"}
+**The pipe operator `%>%`**
+The pipe operator takes the output from one operation, i.e. whatever is on the
+left-hand side of `%>%` and passes it in as the first argument to the second
+operation, or function, on the right-hand side.
+**`x %>% f(y)`** is equivalent to **`f(x, y)`**
+For example:
+`select(starwars, name, height, mass)`
+can be rewritten as
+`starwars %>% select(name, height, mass)`
+This allows for chaining of operations into workflows, e.g.
+`starwars %>%`<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;`filter(species == "Droid") %>%`<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;`select(name, height, mass)`
+The `%>%` operator comes from the `magrittr` package (do you get the reference?)
+and is available when we load the tidyverse using `library(tidyverse)`.
+Piping in R was motivated by the Unix pipe, `|`, in which the output from one
+process is redirected to be the input for the next. This is so named because the
+flow from one process or operation to the next resembles a pipeline.
+```
+
+We can rewrite the code for our filtering and column selection operations as
+follows. Let's have a look to the starwars table:
+
+```{r}
+starwars
+```
+
+Let's chaining together a series of operations, for example:
+
+```{r}
+starwars %>%
+  filter(species == "Droid") %>%
+  dplyr::select(name, height, mass)
+```
+
+Note how each operation takes the output from the previous operation as its
+first argument. This way of coding is embraced wholeheartedly in the tidyverse
+hence almost every tidyverse function that works on data frames has the data
+frame as its first argument. It is also the reason why tidyverse functions
+return a data frame regardless of whether the output could be recast as a vector
+or a single value.
+
+"Piping", the act of chaining operations together, becomes really useful when
+there are several steps involved in filtering and transforming a data set.
+
+The usual way of developing a workflow is to build it up one step at a time,
+testing the output produced at each stage. Let's do that for this case.
+
+When continuing our workflow across multiple lines, we need to be careful to
+ensure the `%>%` is at the end of the line. If we try to place this at the start
+of the next line, R will think we've finished the workflow prematurely and will
+report an error at what it considers the next statement, i.e. the line that
+begins with `%>%`.
+
+This is very similar to what we saw with adding layers and other components to
+a ggplot using the `+` operator, where we needed the `+` to be at the end of a
+line.
+
+We'll be using the pipe `%>%` operator throughout the rest of the course so
+you'd better get used to it. But actually we think you'll come to love it as
+much as we do.
+
+---
+
+## Sorting using `arrange()`
+
+It is sometimes quite useful to sort our data frame based on the values in one
+or more of the columns, particularly when displaying the contents or saving them
+to a file. The `arrange()` function in dplyr provides this sorting capability.
+
+For example, we can sort the TCGA-BRCA patients into order of increasing
+age of diagnosis. We can use the helper function `desc()` that works specifically with `arrange()` too.
+
+```{r}
+arrange(brca.omics.96, age_at_diagnosis)
+```
+
+As with the other tidyverse functions and, in particular, the other 4 key dplyr
+'verbs', `arrange()` works rather well in workflows in which successive
+operations are chained using `%>%`.
+
+```{r}
+arrange(brca.omics.96, age_at_diagnosis) %>%
+  filter(vital_status == "Alive") %>%
+  filter(gender == "female") %>%
+  dplyr::select(GATA3, gender, age_at_diagnosis, vital_status) %>%
+  arrange(desc(age_at_diagnosis))
+```
+
+## # Modifying data using `mutate()`
+
+In one of the examples of filtering observations using `filter()` above, we
+created a new logical variable called `Deceased`.
+
+```{r}
+brca.omics.96$Deceased <- brca.omics.96$vital_status == "Dead"
+```
+
+This is an example of a rather common type of data manipulation in which we
+crate a new column based on the values contained in one or more other columns.
+The `dplyr` package provides the `mutate()` function for this purpose.
+
+```{r}
+brca.omics.96 <- mutate(brca.omics.96, Deceased = vital_status == "Dead")
+```
+
+Both of these methods adds the new column to the end.
+
+Note that variables names in the `mutate()` function call do not need to be
+prefixed by `brca.omics.96$` just as they don't in any of the `dplyr` functions.
+
+We can overwrite a column and this is quite commonly done when we want to change
+the units. For example, we can convert to `age_at_diagnosis` to years by dividing by 365. The **`round()`** function is really useful for rounding numerical values to a
+specified number of decimal places. 
+
+```{r}
+mutate(brca.omics.96, age_at_diagnosis_years = round(age_at_diagnosis / 365)) %>%
+  dplyr::select(age_at_diagnosis,age_at_diagnosis_years)
+```
+
+## Computing summary values using `summarise()`
+
+We'll cover the fifth of the main dplyr 'verb' functions, **`summarise()`**,
+only briefly here. This function computes summary values for one or more
+variables (columns) in a table. Here we will summarise values for the entire
+table but this function is much more useful in combination with `group_by()`
+in working on groups of observations within the data set. We will look at
+summarizing groups of observations next week.
+
+Any function that calculates a single scalar value from a vector can be used
+with `summarise()`. For example, the `mean()` function calculates the arithmetic
+mean of a numeric vector.
+
+```{r}
+mean(brca.omics.96$ESR1)
+```
+
+The equivalent operation using `summarise()` is:
+
+```{r}
+summarise(brca.omics.96, mean(ESR1))
+```
+
+If you prefer Oxford spelling, in which -ize is preferred to -ise, you’re in
+luck as dplyr accommodates the alternative spelling.
+
+Both of the above statements gave the same average expression value but these
+were output in differing formats. The `mean()` function collapses a vector to
+single scalar value, which as we know is in fact a vector of length 1. The
+`summarise()` function, as with most tidyverse functions, returns another data
+frame, albeit one in which there is a single row and a single column.
+
+Returning a data frame might be quite useful, particularly if we’re summarising
+multiple columns or using more than one function, for example computing the
+average and standard deviation.
+
+```{r}
+summarise(brca.omics.96, ESR1_mean = mean(ESR1), ESR1_sd = sd(ESR1), ESR1_min = min(ESR1), ESR1_max = max(ESR1))
+```
+
+Notice how we also named the output columns in this last example.
+
+```{block type = "rmdblock"}
+**`summarise()`**
+`summarise()` collapses a data frame into a single row by calculating summary
+values of one or more of the columns.
+It can take any function that takes a vector of values and returns a single
+value. Some of the more useful functions include:
+* Centre: **`mean()`**, **`median()`**
+* Spread: **`sd()`**, **`mad()`**
+* Range: **`min()`**, **`max()`**, **`quantile()`**
+* Position: **`first()`**, **`last()`**
+* Count: **`n()`**
+Note the `first()`, `last()` and `n()` are only really useful when working on
+groups of observations using **`group_by()`**.
+**`n()`** is a special function that returns the number of observations; it
+doesn't take a vector argument, i.e. a column.
+```
+
+It is also possible to summarise using a function that takes more than one
+value, i.e. from multiple columns. For example, we could compute the correlation
+between the expression of FOXA1 and MLPH.
+
+```{r}
+summarise(brca.omics.96, correlation = cor(GATA3, ESR1))
+```
 
 
 # Citation
@@ -139,4 +1277,14 @@ If you use TCGAbiolinks, please cite:
 
 In this course we have covered the following concepts:
 
-* The ...
+* How to use ggplot2 to create different types of plot using a common grammar
+* How to map variables to aesthetic features of a plot
+* How to construct a plot with multiple layers (geoms)
+* Various types of plot including scatter plots, box plots, bar plots and histograms
+* Filtering rows in a data frame based on their values
+* Selecting and reordering of columns
+* Sorting rows based on values in one or more columns
+* Modifying a data frame by either adding new columns or modifying existing ones
+* Summarizing the values in one or more columns
+* Building up workflows by chaining operations together using the pipe operator
+* Faceting of ggplot2 visualizations
